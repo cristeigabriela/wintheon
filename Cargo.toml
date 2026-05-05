@@ -1,0 +1,15 @@
+[package]
+name = "wintheon"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+png = "0.18.1"
+thiserror = "2.0.18"
+wincorda = "0.3.0"
+windows = { version = "0.62.2", features = ["Win32_UI_Shell", "Win32_System_Com", "Win32_Storage_FileSystem", "Win32_Foundation"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem", "Win32_Globalization", "Win32_System_SystemServices", "Win32_System_IO", "Win32_System_Ioctl", "Win32_Security", "Wdk_Storage_FileSystem", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi"] }
+
+[dev-dependencies]
+eframe = "0.34.2"
+wildmatch = "2.6.1"
