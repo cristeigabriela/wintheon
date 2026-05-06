@@ -66,6 +66,7 @@ impl Translation {
     /// The user's current UI language
     /// ([`GetUserDefaultUILanguage`](https://learn.microsoft.com/en-us/windows/win32/api/winnls/nf-winnls-getuserdefaultuilanguage))
     /// paired with the Unicode codepage.
+    #[must_use]
     pub fn from_system() -> Self {
         Self {
             language: unsafe { GetUserDefaultUILanguage() },
@@ -75,6 +76,7 @@ impl Translation {
 }
 
 /// String fields from a single `\StringFileInfo\<lang-codepage>\` block.
+///
 /// Every field is optional — a PE may declare any subset. Field names
 /// mirror the [`System.Diagnostics.FileVersionInfo`](https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.fileversioninfo?view=net-10.0)
 /// surface .NET exposes for the same `VS_VERSIONINFO` resource.
@@ -127,6 +129,7 @@ impl FileInformation {
     /// `"Microsoft® Windows® Operating System"` string that ships on
     /// most bundled system executables (notepad, cmd, mspaint, …) — too
     /// generic to surface as a display label.
+    #[must_use]
     pub fn meaningful_product_name(&self) -> Option<&str> {
         let raw = self.product_name()?;
         if raw == "Microsoft\u{ae} Windows\u{ae} Operating System" {
@@ -222,6 +225,7 @@ impl FileVersionInfo {
     /// * `translation`: The language to seek out the file version information for.
     ///   Combine with [`Translation::default`] for English or
     ///   [`Translation::from_system`] for the system UI language.
+    #[must_use]
     pub fn for_translation(&self, translation: Translation) -> Option<&FileInformation> {
         self.by_translation
             .get(&translation)
@@ -232,24 +236,28 @@ impl FileVersionInfo {
 
     /// Shortcut for [`for_translation`](Self::for_translation) with
     /// [`Translation::default`] (US English).
+    #[must_use]
     pub fn english(&self) -> Option<&FileInformation> {
         self.for_translation(Translation::default())
     }
 
     /// Shortcut for [`for_translation`](Self::for_translation) with
     /// [`Translation::from_system`] (the user's UI language).
+    #[must_use]
     pub fn system(&self) -> Option<&FileInformation> {
         self.for_translation(Translation::from_system())
     }
 
     /// All loaded translations.
-    pub fn all(&self) -> &HashMap<Translation, FileInformation> {
+    #[must_use]
+    pub const fn all(&self) -> &HashMap<Translation, FileInformation> {
         &self.by_translation
     }
 
     /// File-global numeric/flag info from the root `VS_FIXEDFILEINFO`.
     /// `None` when the resource omitted it or `VerQueryValueW` failed.
-    pub fn fixed(&self) -> Option<&FixedFileInfo> {
+    #[must_use]
+    pub const fn fixed(&self) -> Option<&FixedFileInfo> {
         self.fixed.as_ref()
     }
 }
@@ -275,8 +283,7 @@ fn read_block(path_w: &NullTerminated<'static, WCHAR>) -> io::Result<Vec<u8>> {
     let mut buffer = vec![0u8; size as usize];
 
     // NOTE: `dwHandle` is ignored.
-    let ok =
-        unsafe { GetFileVersionInfoW(path_w.as_ptr(), 0, size, buffer.as_mut_ptr() as *mut _) };
+    let ok = unsafe { GetFileVersionInfoW(path_w.as_ptr(), 0, size, buffer.as_mut_ptr().cast()) };
     if ok == 0 {
         return Err(io::Error::last_os_error());
     }
@@ -294,10 +301,10 @@ fn read_translations(buffer: &[u8]) -> Vec<Translation> {
     let mut len: u32 = 0;
     let ok = unsafe {
         VerQueryValueW(
-            buffer.as_ptr() as *const c_void,
+            buffer.as_ptr().cast::<c_void>(),
             sub_block.as_ptr(),
-            &mut data,
-            &mut len,
+            &raw mut data,
+            &raw mut len,
         )
     };
     if ok == 0 || data.is_null() || len == 0 {
@@ -346,10 +353,10 @@ fn read_string(buffer: &[u8], prefix: &str, name: &str) -> Option<String> {
     let mut len: u32 = 0;
     let ok = unsafe {
         VerQueryValueW(
-            buffer.as_ptr() as *const c_void,
+            buffer.as_ptr().cast::<c_void>(),
             path.as_ptr(),
-            &mut data,
-            &mut len,
+            &raw mut data,
+            &raw mut len,
         )
     };
     if ok == 0 || data.is_null() || len == 0 {
@@ -368,10 +375,10 @@ fn read_fixed(buffer: &[u8]) -> Option<FixedFileInfo> {
     let mut len: u32 = 0;
     let ok = unsafe {
         VerQueryValueW(
-            buffer.as_ptr() as *const c_void,
+            buffer.as_ptr().cast::<c_void>(),
             sub_block.as_ptr(),
-            &mut data,
-            &mut len,
+            &raw mut data,
+            &raw mut len,
         )
     };
     if ok == 0 || data.is_null() || (len as usize) < mem::size_of::<VS_FIXEDFILEINFO>() {
@@ -407,7 +414,7 @@ fn read_fixed(buffer: &[u8]) -> Option<FixedFileInfo> {
         file_os: v.dwFileOS,
         file_type: v.dwFileType,
         file_subtype: v.dwFileSubtype as i32,
-        file_date: ((v.dwFileDateMS as u64) << 32) | (v.dwFileDateLS as u64),
+        file_date: (u64::from(v.dwFileDateMS) << 32) | u64::from(v.dwFileDateLS),
     })
 }
 

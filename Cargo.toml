@@ -2,14 +2,37 @@
 name = "wintheon"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+authors = ["Gabriela Cristei <cristei.g772@gmail.com>"]
+description = "Library to discover, rank and inspect launchable Windows file entries."
+repository = "https://github.com/cristeigabriela/wintheon"
+homepage = "https://github.com/cristeigabriela/wintheon"
+documentation = "https://docs.rs/wintheon"
+license = "MIT OR Apache-2.0"
+readme = false
+keywords = ["windows", "launcher", "shortcut", "icon", "shell"]
+categories = ["os::windows-apis", "filesystem"]
 
 [dependencies]
 png = "0.18.1"
 thiserror = "2.0.18"
+tracing = "0.1.41"
 wincorda = "0.3.0"
-windows = { version = "0.62.2", features = ["Win32_UI_Shell", "Win32_System_Com", "Win32_Storage_FileSystem", "Win32_Foundation"] }
+windows = { version = "0.62.2", features = ["Win32_UI_Shell", "Win32_UI_Controls", "Win32_UI_WindowsAndMessaging", "Win32_System_Com", "Win32_Storage_FileSystem", "Win32_Foundation", "Win32_Graphics_Gdi"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem", "Win32_Globalization", "Win32_System_SystemServices", "Win32_System_IO", "Win32_System_Ioctl", "Win32_Security", "Wdk_Storage_FileSystem", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi"] }
 
 [dev-dependencies]
 eframe = "0.34.2"
+global-hotkey = "0.7"
+mmap-io = "0.9"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 wildmatch = "2.6.1"
+
+# docs.rs builds on Linux by default; force the Windows MSVC target
+# so the Win32-touching code compiles instead of producing an empty
+# build log. `default-target` decides which target's docs are landed
+# on first; `targets` is the full set built and offered in the
+# top-bar dropdown.
+[package.metadata.docs.rs]
+default-target = "x86_64-pc-windows-msvc"
+targets = ["x86_64-pc-windows-msvc"]

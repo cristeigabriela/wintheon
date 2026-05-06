@@ -3,6 +3,8 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+use tracing::trace;
+
 use crate::file::{FileEntry, Result};
 
 /// Wraps a stream of [`FileEntry`] results and drops duplicates.
@@ -20,11 +22,6 @@ use crate::file::{FileEntry, Result};
 ///   with the *same filename* and *same target* (e.g. the same
 ///   `Registry Finder.lnk` appearing on both the Desktop and the Start
 ///   Menu) collapse to one entry.
-///
-/// Path comparisons are done on the lowercased path string — Windows
-/// file paths are case-insensitive, but `IShellLinkW::GetPath` and
-/// `fs::read_dir` don't always agree on the case of the strings they
-/// return for the same file.
 ///
 /// `Err` items pass straight through.
 pub struct DedupByRealpath<I> {
@@ -52,10 +49,10 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             let item = self.inner.next()?;
-            let entry = match &item {
-                Ok(e) => e,
-                Err(_) => return Some(item),
+            let Ok(entry) = &item else {
+                return Some(item);
             };
+
             if dedup_decision(
                 &mut self.seen_targets,
                 &mut self.seen_aliased_lnks,
@@ -71,11 +68,11 @@ where
 /// Shared heuristic between [`DedupByRealpath`] and the [`Gatherer`](super::Gatherer).
 /// Returns `true` to keep the entry; updates the appropriate `seen` set.
 ///
-/// Keys are the lowercased path strings — Windows file paths are
+/// Keys are the lowercased path strings. Windows file paths are
 /// case-insensitive at the file system layer, and the various Win32
 /// surfaces (`IShellLinkW::GetPath`, `fs::read_dir`, etc.) return the
 /// same file with inconsistent case.
-pub(crate) fn dedup_decision(
+pub fn dedup_decision(
     seen_targets: &mut HashSet<String>,
     seen_aliased_lnks: &mut HashSet<(String, String)>,
     target: &Path,
@@ -100,13 +97,21 @@ pub(crate) fn dedup_decision(
         (Some(l), Some(t)) if l != t
     );
 
-    if is_aliased_lnk {
-        // Aliased shortcut — dedup by (target, link filename) so two
+    let kept = if is_aliased_lnk {
+        // Aliased shortcut. Dedup by (target, link filename) so two
         // copies of the same `.lnk` from different sources collapse,
         // but distinct aliases (e.g. x64 vs x86 dev prompts) survive.
-        seen_aliased_lnks.insert((target_key, lnk_stem.unwrap()))
+        seen_aliased_lnks.insert((target_key.clone(), lnk_stem.clone().unwrap()))
     } else {
-        // Trivial shortcut or plain file/reparse — dedup by target.
-        seen_targets.insert(target_key)
-    }
+        // Trivial shortcut or plain file/reparse. Ddedup by target.
+        seen_targets.insert(target_key.clone())
+    };
+    trace!(
+        target = %target_key,
+        link = ?lnk_stem,
+        aliased = is_aliased_lnk,
+        kept,
+        "dedup decision",
+    );
+    kept
 }

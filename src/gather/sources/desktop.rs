@@ -6,10 +6,15 @@ use crate::gather::{FileEntries, Origin, Source};
 
 use super::read_folder;
 
+/// [`Source`] over the per-user (`%USERPROFILE%\Desktop`) and shared
+/// (`%PUBLIC%\Desktop`) Desktop folders. Non-recursive — Desktop is a
+/// flat folder by convention.
+#[derive(Debug)]
 pub struct DesktopSource;
 
 impl DesktopSource {
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self
     }
 

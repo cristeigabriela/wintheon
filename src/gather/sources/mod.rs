@@ -1,3 +1,7 @@
+//! Built-in [`Source`](super::Source) implementations covering the
+//! locations a typical Windows launcher cares about — Desktop, Start
+//! Menu, and the Microsoft Store `WindowsApps` stub directory.
+
 mod desktop;
 mod start_menu;
 mod windows_apps;
@@ -11,6 +15,7 @@ use std::io;
 use std::os::windows::fs::MetadataExt;
 use std::path::PathBuf;
 
+use tracing::trace;
 use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
 use crate::file::{FileEntry, RegularFile, ReparsePoint, Result, Shortcut};
@@ -31,7 +36,7 @@ pub(super) fn read_folder_recursive(folder: PathBuf) -> FileEntries<'static> {
 
 /// Map a directory entry to the appropriate [`FileEntry`] impl.
 ///
-/// Tries `.lnk` shortcut resolution first, then AppExec reparse-point
+/// Tries `.lnk` shortcut resolution first, then `AppExec` reparse-point
 /// resolution; falls back to a plain [`RegularFile`].
 pub(super) fn classify(entry: io::Result<fs::DirEntry>) -> Result<Box<dyn FileEntry>> {
     let entry = entry?;
@@ -42,6 +47,7 @@ pub(super) fn classify(entry: io::Result<fs::DirEntry>) -> Result<Box<dyn FileEn
         .is_some_and(|ext| ext.eq_ignore_ascii_case("lnk"))
         && let Some(shortcut) = Shortcut::new(path.clone())
     {
+        trace!(path = %path.display(), kind = "Shortcut", "classified entry");
         return Ok(Box::new(shortcut));
     }
 
@@ -52,12 +58,12 @@ pub(super) fn classify(entry: io::Result<fs::DirEntry>) -> Result<Box<dyn FileEn
         .metadata()
         .ok()
         .is_some_and(|m| m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0);
-    if is_reparse
-        && let Some(reparse) = ReparsePoint::new(path.clone())
-    {
+    if is_reparse && let Some(reparse) = ReparsePoint::new(path.clone()) {
+        trace!(path = %path.display(), kind = "ReparsePoint", "classified entry");
         return Ok(Box::new(reparse));
     }
 
+    trace!(path = %path.display(), kind = "RegularFile", "classified entry");
     Ok(Box::new(RegularFile::new(path)))
 }
 
@@ -111,10 +117,12 @@ impl Iterator for FolderWalker {
                     // not `IO_REPARSE_TAG_SYMLINK`, so they fall through
                     // to the file branch as expected.
                     if file_type.is_symlink() {
+                        trace!(path = %entry.path().display(), "skipping symlink/junction");
                         continue;
                     }
                     if file_type.is_dir() {
                         if self.recursive {
+                            trace!(path = %entry.path().display(), "descending into subdirectory");
                             match fs::read_dir(entry.path()) {
                                 Ok(rd) => self.stack.push(rd),
                                 Err(err) => return Some(Err(err)),

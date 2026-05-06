@@ -14,8 +14,16 @@ use std::borrow::Cow;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Origin {
+    /// `%USERPROFILE%\Desktop` and `%PUBLIC%\Desktop`. Reported by
+    /// [`DesktopSource`](super::DesktopSource).
     Desktop,
+    /// Per-user `%APPDATA%\Microsoft\Windows\Start Menu\Programs` and
+    /// system-wide `%ProgramData%\Microsoft\Windows\Start Menu\Programs`.
+    /// Reported by [`StartMenuSource`](super::StartMenuSource).
     StartMenu,
+    /// `%LOCALAPPDATA%\Microsoft\WindowsApps` — the `AppExec` stub
+    /// directory used by the Microsoft Store and command-line shims.
+    /// Reported by [`WindowsAppsSource`](super::WindowsAppsSource).
     WindowsApps,
     /// User-defined source label. Use `Cow::Borrowed("…")` for static
     /// names (the common case) or `Cow::Owned(…)` for runtime ones.
@@ -25,10 +33,10 @@ pub enum Origin {
 impl fmt::Display for Origin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Origin::Desktop => f.write_str("Desktop"),
-            Origin::StartMenu => f.write_str("Start Menu"),
-            Origin::WindowsApps => f.write_str("Apps"),
-            Origin::Custom(label) => f.write_str(label),
+            Self::Desktop => f.write_str("Desktop"),
+            Self::StartMenu => f.write_str("Start Menu"),
+            Self::WindowsApps => f.write_str("Windows Apps"),
+            Self::Custom(label) => f.write_str(label),
         }
     }
 }

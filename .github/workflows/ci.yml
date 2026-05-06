@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  # Coalesce in-flight runs on the same ref so PR pushes don't pile up.
+  # Pushes to main get distinct groups (one run per commit).
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  # rustfmt + clippy gate every PR. They don't run on push-to-main —
+  # if main ever drifts out of fmt/lint compliance the PR that fixes it
+  # will catch it on the way back in.
+  fmt:
+    if: github.event_name == 'pull_request'
+    name: rustfmt
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    if: github.event_name == 'pull_request'
+    name: clippy
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  # Tests run on PRs *and* on every push to main, so a regression
+  # caught after merge still shows up red on the branch.
+  test:
+    name: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # `--all-targets` compiles tests, examples (incl. the launcher),
+      # and benches — surfaces breakage in any of them, not just lib.
+      - run: cargo test --all-targets --all-features

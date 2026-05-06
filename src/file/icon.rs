@@ -1,3 +1,3 @@
-//! File icons — re-exported from the WinAPI layer.
+//! File icons — re-exported from the `WinAPI` layer.
 
-pub use crate::win::{FileIcon, ICON_SIZE};
+pub use crate::win::{FileIcon, ICON_SIZE, IconSize};

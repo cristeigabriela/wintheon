@@ -5,8 +5,13 @@
 
 use std::path::PathBuf;
 
-use wintheon::file::{FileEntry, FileIcon, RegularFile, ReparsePoint, Shortcut, Translation};
-use wintheon::gather::{DesktopSource, Origin, Source, StartMenuSource, WindowsAppsSource};
+use wintheon::file::{
+    FileEntry, FileIcon, Priority, RegularFile, ReparsePoint, Shortcut, Translation,
+};
+use wintheon::gather::{
+    DedupByRealpath, DesktopSource, MatchIndex, Origin, Source, StartMenuSource, WeightedEntry,
+    WeightedEntryIteratorExt, WindowsAppsSource,
+};
 
 #[test]
 fn translation_default_is_us_english_unicode() {
@@ -67,4 +72,138 @@ fn sources_implement_default() {
     let _: DesktopSource = Default::default();
     let _: StartMenuSource = Default::default();
     let _: WindowsAppsSource = Default::default();
+}
+
+#[test]
+fn match_index_tier_ladder_for_synthetic_paths() {
+    // Nonexistent paths -> `version_info` errors out and `RegularFile`
+    // falls back to file_stem for `display_name`. That makes these
+    // tier-ladder assertions robust to whatever the host has installed.
+    let notepad = RegularFile::new(PathBuf::from(r"C:\fake\notepad.exe"));
+    let idx = MatchIndex::from_entry(&notepad);
+    // display_lc = "notepad", path stem = "notepad"
+    assert_eq!(idx.score("notepad"), Some(10.0), "exact match");
+    assert_eq!(idx.score("note"), Some(8.0), "starts_with");
+    assert_eq!(idx.score("pad"), Some(1.0), "mid-word in display");
+    assert_eq!(idx.score(""), Some(1.0), "empty needle is neutral");
+    assert_eq!(idx.score("zzz"), None, "no match");
+}
+
+#[test]
+fn match_index_word_boundary_outranks_mid_word_substring() {
+    // The motivating case: query "chrome" must rank "Google Chrome"
+    // (display contains at word boundary, tier 3 = 3.0) above
+    // "iCloudChrome" (mid-word substring, tier 5 = 1.0).
+    let google = RegularFile::new(PathBuf::from(r"C:\fake\Google Chrome.exe"));
+    let icloud = RegularFile::new(PathBuf::from(r"C:\fake\iCloudChrome.exe"));
+    let g = MatchIndex::from_entry(&google);
+    let i = MatchIndex::from_entry(&icloud);
+    let g_score = g.score("chrome").expect("google should match");
+    let i_score = i.score("chrome").expect("icloud should still match");
+    assert!(g_score > i_score, "{g_score} should outrank {i_score}");
+    assert_eq!(g_score, 3.0);
+    assert_eq!(i_score, 1.0);
+}
+
+#[test]
+fn weighted_entry_priority_score_multiplies_source_and_entry() {
+    // `.txt` isn't in `%PATHEXT%` so `RegularFile::priority` returns 1.0;
+    // multiplied by source 2.5 we expect exactly 2.5.
+    let entry: Box<dyn FileEntry> = Box::new(RegularFile::new(PathBuf::from(r"C:\example.txt")));
+    let weighted = WeightedEntry::new(entry, Origin::Desktop, Priority(2.5));
+    assert_eq!(weighted.priority_score(), 2.5);
+}
+
+#[test]
+fn weighted_entry_score_auto_lowercases_query() {
+    // Mixed-case input should produce the same score as the lowercased
+    // version — the Cow-based check inside `score` must allocate when
+    // needed without leaking the casing distinction to the caller.
+    let entry: Box<dyn FileEntry> =
+        Box::new(RegularFile::new(PathBuf::from(r"C:\fake\notepad.exe")));
+    let weighted = WeightedEntry::new(entry, Origin::Desktop, Priority(1.0));
+    let lower = weighted.score("notepad");
+    let upper = weighted.score("NOTEPAD");
+    let mixed = weighted.score("Notepad");
+    assert!(lower.is_some());
+    assert_eq!(lower, upper);
+    assert_eq!(lower, mixed);
+}
+
+#[test]
+fn weighted_entry_score_empty_query_returns_priority_score() {
+    // Empty needle is a neutral 1.0 multiplier, so `score("")` should
+    // collapse to `priority_score()`.
+    let entry: Box<dyn FileEntry> =
+        Box::new(RegularFile::new(PathBuf::from(r"C:\fake\notepad.exe")));
+    let weighted = WeightedEntry::new(entry, Origin::Desktop, Priority(1.5));
+    assert_eq!(weighted.score(""), Some(weighted.priority_score()));
+}
+
+#[test]
+fn sorted_by_score_filters_misses_and_orders_descending() {
+    // Two entries match "note" at tier 2 (starts_with). Different
+    // priorities resolve the tie, so the higher-priority one wins.
+    // Scores aren't returned (sorted_by_score drops them after sorting),
+    // so we verify the ordering by inspecting the resulting items.
+    let entries = [
+        WeightedEntry::new(
+            Box::new(RegularFile::new(PathBuf::from(r"C:\fake\notepad.exe"))),
+            Origin::Desktop,
+            Priority(1.0),
+        ),
+        WeightedEntry::new(
+            Box::new(RegularFile::new(PathBuf::from(
+                r"C:\fake\note taking app.exe",
+            ))),
+            Origin::Desktop,
+            Priority(2.0),
+        ),
+        WeightedEntry::new(
+            Box::new(RegularFile::new(PathBuf::from(r"C:\fake\unrelated.exe"))),
+            Origin::Desktop,
+            Priority(1.0),
+        ),
+    ];
+
+    let ranked = entries.iter().sorted_by_score("note");
+
+    assert_eq!(ranked.len(), 2, "unrelated.exe should be filtered out");
+    let first = ranked[0]
+        .entry
+        .path()
+        .file_stem()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert_eq!(
+        first, "note taking app",
+        "higher priority should sort first"
+    );
+}
+
+#[test]
+fn dedup_by_realpath_drops_duplicate_targets() {
+    // Two `RegularFile` entries pointing at the same path should
+    // collapse to one through `DedupByRealpath`. The lowercased path
+    // string is the dedup key, so casing differences also fold.
+    let stream: Vec<wintheon::file::Result<Box<dyn FileEntry>>> = vec![
+        Ok(Box::new(RegularFile::new(PathBuf::from(
+            r"C:\fake\App.exe",
+        )))),
+        Ok(Box::new(RegularFile::new(PathBuf::from(
+            r"C:\FAKE\APP.EXE",
+        )))),
+        Ok(Box::new(RegularFile::new(PathBuf::from(
+            r"C:\fake\Other.exe",
+        )))),
+    ];
+    let kept: Vec<_> = DedupByRealpath::new(stream.into_iter())
+        .filter_map(|r| r.ok())
+        .collect();
+    assert_eq!(
+        kept.len(),
+        2,
+        "case-insensitive dedup should collapse the two App.exe entries"
+    );
 }
